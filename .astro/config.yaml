@@ -1,0 +1,6 @@
+postgres:
+    port: "5437"
+project:
+    name: ml-flow
+webserver:
+    port: "8078"
