@@ -1,13 +1,28 @@
 from airflow.decorators import dag, task
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-from airflow.providers.amazon.aws.operators.s3 import S3CreateBucketOperator
-# Correct imports for S3 transfer operators
-from airflow.providers.amazon.aws.transfers.s3_to_redshift import S3ToRedshiftOperator
-from airflow.providers.amazon.aws.transfers.local_to_s3 import LocalFilesystemToS3Operator
 from datetime import datetime
 import pandas as pd
 import mlflow
+import boto3
+import os
+import logging
+import io
+from airflow.exceptions import AirflowSkipException
+from dotenv import load_dotenv
+
+load_dotenv()
+
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+RDS_CONNECTION_ID = os.getenv('RDS_CONNECTION_ID')
+ACTIVITY_BUCKET_NAME = os.getenv('ACTIVITY_BUCKET_NAME')
+ACTIVITY_FILE_KEY = os.getenv('ACTIVITY_FILE_KEY')
+PROCESSED_DATA_BUCKET_NAME = os.getenv('PROCESSED_DATA_BUCKET_NAME')
+MLFLOW_TRACKING_URI = os.getenv('MLFLOW_TRACKING_URI')
+MLFLOW_EXPERIMENT_NAME = os.getenv('MLFLOW_EXPERIMENT_NAME')
+MLFLOW_MODEL_NAME = os.getenv('MLFLOW_MODEL_NAME')
 
 @dag(
     dag_id='crm_activity_mlflow_pipeline',
@@ -15,92 +30,93 @@ import mlflow
     schedule=None,
     catchup=False,
     default_args={'owner': 'airflow', 'retries': 2},
-    tags=['CRM', 'Activity', 'MLflow', 'Machine Learning'],
-    description='Pipeline to extract CRM and activity data, process it, and train/register a machine learning model using MLflow.'
+    tags=['CRM', 'Activity', 'MLflow', 'Machine Learning']
 )
 def crm_activity_mlflow_pipeline():
-    """
-    DAG to extract CRM and activity data, process it, and train/register a machine learning model using MLflow.
-    """
+    def get_boto3_session():
+        return boto3.Session(
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION
+        )
 
     @task
     def extract_crm_data() -> pd.DataFrame:
-        """
-        Extract CRM data from an RDS database.
-        """
-        # Replace <sql_query> and <connection_id> with appropriate values
+        logging.info("Extracting CRM data from RDS")
         sql_query = "SELECT * FROM crm_data"
-        connection_id = "<rds_connection_id>"
-        hook = SQLExecuteQueryOperator.get_hook(conn_id=connection_id)
+        hook = SQLExecuteQueryOperator.get_hook(conn_id=RDS_CONNECTION_ID)
         crm_data = hook.get_pandas_df(sql=sql_query)
+        if crm_data.empty:
+            logging.warning("CRM data is empty. Skipping downstream tasks.")
+            raise AirflowSkipException("No CRM data available")
         return crm_data
 
     @task
     def extract_activity_data() -> pd.DataFrame:
-        """
-        Extract activity data from an S3 bucket.
-        """
-        # Replace <bucket_name> and <file_key> with appropriate values
-        bucket_name = "<activity_bucket_name>"
-        file_key = "<activity_file_key>"
-        s3_hook = S3Hook(aws_conn_id="<aws_connection_id>")
-        activity_data = s3_hook.read_key(key=file_key, bucket_name=bucket_name)
-        return pd.read_csv(activity_data)
+        logging.info("Extracting activity data from S3")
+        session = get_boto3_session()
+        s3_client = session.client('s3')
+        response = s3_client.list_objects_v2(Bucket=ACTIVITY_BUCKET_NAME, Prefix=ACTIVITY_FILE_KEY)
+
+        if 'Contents' not in response:
+            logging.warning("No activity data found in S3. Skipping downstream tasks.")
+            raise AirflowSkipException("No activity data in S3")
+
+        all_dfs = []
+        for obj in response['Contents']:
+            key = obj['Key']
+            if not key.endswith('.csv'):
+                continue
+            file_response = s3_client.get_object(Bucket=ACTIVITY_BUCKET_NAME, Key=key)
+            file_content = file_response['Body'].read()
+            df = pd.read_csv(io.BytesIO(file_content))
+            df['source_file'] = key
+            all_dfs.append(df)
+
+        if not all_dfs:
+            logging.warning("No valid CSV files found in activity data.")
+            raise AirflowSkipException("No valid activity data")
+
+        combined_data = pd.concat(all_dfs, ignore_index=True)
+        logging.info(f"Extracted {len(combined_data)} rows from {len(all_dfs)} CSV files")
+        return combined_data
 
     @task
     def merge_and_transform(crm_data: pd.DataFrame, activity_data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Merge and transform the CRM and activity data.
-        """
-        merged_data = pd.merge(crm_data, activity_data, on="user_id", how="inner")
-        # Perform transformations (e.g., renaming columns, handling missing values)
+        merged_data = pd.merge(crm_data, activity_data, on="customer_id", how="inner")
         transformed_data = merged_data.fillna(0)
         return transformed_data
 
     @task
     def clean_and_feature_engineer(data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Clean, deduplicate, and perform feature engineering on the combined data.
-        """
         data.drop_duplicates(inplace=True)
-        # Example feature engineering: one-hot encoding, scaling, etc.
-        data = pd.get_dummies(data, columns=["category"])
+        if 'category' in data.columns:
+            data = pd.get_dummies(data, columns=["category"])
         return data
 
     @task
-    def load_to_s3(processed_data: pd.DataFrame):
-        """
-        Load the processed data into an S3 bucket.
-        """
-        # Replace <bucket_name> and <file_key> with appropriate values
-        bucket_name = "<processed_data_bucket_name>"
-        file_key = "processed_data.csv"
-        s3_hook = S3Hook(aws_conn_id="<aws_connection_id>")
-        s3_hook.load_string(
-            string_data=processed_data.to_csv(index=False),
-            key=file_key,
-            bucket_name=bucket_name,
-            replace=True
-        )
+    def load_to_s3(processed_data: pd.DataFrame) -> str:
+        session = get_boto3_session()
+        s3_client = session.client('s3')
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.csv') as temp_file:
+            processed_data.to_csv(temp_file.name, index=False)
+            temp_file.flush()
+            s3_client.upload_file(Filename=temp_file.name, Bucket=PROCESSED_DATA_BUCKET_NAME, Key="processed_data.csv")
+        return "processed_data.csv"
 
     @task
-    def trigger_mlflow_workflow():
-        """
-        Trigger an MLflow workflow to train a machine learning model using the data from S3.
-        """
-        # Replace <bucket_name> and <file_key> with appropriate values
-        bucket_name = "<processed_data_bucket_name>"
-        file_key = "processed_data.csv"
-        s3_hook = S3Hook(aws_conn_id="<aws_connection_id>")
-        data = pd.read_csv(s3_hook.read_key(key=file_key, bucket_name=bucket_name))
-
-        # Split data into features and target
+    def trigger_mlflow_workflow(s3_key: str) -> str:
+        session = get_boto3_session()
+        s3_client = session.client('s3')
+        response = s3_client.get_object(Bucket=PROCESSED_DATA_BUCKET_NAME, Key=s3_key)
+        data = pd.read_csv(io.BytesIO(response['Body'].read()))
         X = data.drop(columns=["target"])
         y = data["target"]
 
-        # Train a model using MLflow
-        mlflow.set_tracking_uri("<mlflow_tracking_uri>")
-        mlflow.set_experiment("<mlflow_experiment_name>")
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+
         with mlflow.start_run():
             from sklearn.ensemble import RandomForestClassifier
             from sklearn.model_selection import train_test_split
@@ -111,7 +127,6 @@ def crm_activity_mlflow_pipeline():
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
 
-            # Log metrics and artifacts
             accuracy = accuracy_score(y_test, y_pred)
             mlflow.log_metric("accuracy", accuracy)
             mlflow.sklearn.log_model(model, "model")
@@ -120,31 +135,26 @@ def crm_activity_mlflow_pipeline():
 
     @task
     def register_best_model(run_id: str):
-        """
-        Register the best model in the MLflow Model Registry.
-        """
-        mlflow.set_tracking_uri("<mlflow_tracking_uri>")
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
         client = mlflow.tracking.MlflowClient()
-        model_name = "<mlflow_model_name>"
         model_version = client.create_model_version(
-            name=model_name,
+            name=MLFLOW_MODEL_NAME,
             source=f"runs:/{run_id}/model",
             run_id=run_id
         )
         client.transition_model_version_stage(
-            name=model_name,
+            name=MLFLOW_MODEL_NAME,
             version=model_version.version,
             stage="Staging"
         )
 
-    # Define task dependencies
-    crm_data = extract_crm_data()
-    activity_data = extract_activity_data()
-    merged_data = merge_and_transform(crm_data, activity_data)
-    processed_data = clean_and_feature_engineer(merged_data)
-    load_to_s3(processed_data)
-    mlflow_run_id = trigger_mlflow_workflow()
-    register_best_model(mlflow_run_id)
-
+    # DAG execution flow
+    crm = extract_crm_data()
+    activity = extract_activity_data()
+    merged = merge_and_transform(crm, activity)
+    features = clean_and_feature_engineer(merged)
+    s3_key = load_to_s3(features)
+    mlflow_id = trigger_mlflow_workflow(s3_key)
+    register_best_model(mlflow_id)
 
 crm_activity_mlflow_pipeline()
