@@ -84,14 +84,14 @@ def crm_activity_mlflow_pipeline():
     @task
     def merge_and_transform(crm_data: pd.DataFrame, activity_data: pd.DataFrame) -> pd.DataFrame:
         merged_data = pd.merge(crm_data, activity_data, on="customer_id", how="inner")
-        transformed_data = merged_data.fillna(0)
+        transformed_data = merged_data.drop_duplicates()
         return transformed_data
 
     @task
     def clean_and_feature_engineer(data: pd.DataFrame) -> pd.DataFrame:
         data.drop_duplicates(inplace=True)
-        if 'category' in data.columns:
-            data = pd.get_dummies(data, columns=["category"])
+        if 'event_type' in data.columns:
+            data = pd.get_dummies(data, columns=["event_type"])
         return data
 
     @task
@@ -111,8 +111,8 @@ def crm_activity_mlflow_pipeline():
         s3_client = session.client('s3')
         response = s3_client.get_object(Bucket=PROCESSED_DATA_BUCKET_NAME, Key=s3_key)
         data = pd.read_csv(io.BytesIO(response['Body'].read()))
-        X = data.drop(columns=["target"])
-        y = data["target"]
+        X = data.drop(columns=["churned"])
+        y = data["churned"]
 
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
         mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
