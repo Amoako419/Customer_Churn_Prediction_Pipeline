@@ -120,6 +120,30 @@ MLFLOW_MODEL_NAME=crm_activity_classifier
 pip install -r requirements.txt
 ```
 
+## Testing
+
+### Local Testing
+
+1. Run Astro tests:
+```bash
+astro dev test tests
+```
+
+2. Run pytest:
+```bash
+pytest tests/
+```
+
+### Continuous Integration
+
+The project uses GitHub Actions for CI/CD. On every push and pull request:
+- DAGs are parsed for syntax errors
+- Unit tests are run
+- Integration tests are executed
+- Code quality checks are performed
+
+View test results in the GitHub Actions tab of the repository.
+
 ## Running the Pipeline
 
 1. Start the MLflow tracking server:
