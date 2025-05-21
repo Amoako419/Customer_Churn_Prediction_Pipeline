@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/586835560072035841/9838d821f94e47a5b375033d18414cbe/artifacts
+end_time: 1747820325646
+entry_point_name: ''
+experiment_id: '586835560072035841'
+lifecycle_stage: active
+run_id: 9838d821f94e47a5b375033d18414cbe
+run_name: silent-dolphin-718
+run_uuid: 9838d821f94e47a5b375033d18414cbe
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747820322396
+status: 4
+tags: []
+user_id: astro
