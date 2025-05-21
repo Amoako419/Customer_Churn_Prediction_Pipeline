@@ -89,7 +89,7 @@ def crm_activity_mlflow_pipeline():
 
     @task
     def clean_and_feature_engineer(data: pd.DataFrame) -> pd.DataFrame:
-        data.drop_duplicates(inplace=True)
+        data = data.drop_duplicates()
         if 'event_type' in data.columns:
             data = pd.get_dummies(data, columns=["event_type"])
         return data
@@ -98,44 +98,69 @@ def crm_activity_mlflow_pipeline():
     def load_to_s3(processed_data: pd.DataFrame) -> str:
         session = get_boto3_session()
         s3_client = session.client('s3')
+        
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        s3_key = f"processed_folder/{timestamp}_processed_data.csv"
+        
         import tempfile
         with tempfile.NamedTemporaryFile(suffix='.csv') as temp_file:
             processed_data.to_csv(temp_file.name, index=False)
             temp_file.flush()
-            s3_client.upload_file(Filename=temp_file.name, Bucket=PROCESSED_DATA_BUCKET_NAME, Key="processed_data.csv")
-        return "processed_data.csv"
-
+            s3_client.upload_file(
+                Filename=temp_file.name,
+                Bucket=PROCESSED_DATA_BUCKET_NAME,
+                Key=s3_key
+            )
+        return s3_key
+    
     @task
     def trigger_mlflow_workflow(s3_key: str) -> str:
-        session = get_boto3_session()
-        s3_client = session.client('s3')
-        response = s3_client.get_object(Bucket=PROCESSED_DATA_BUCKET_NAME, Key=s3_key)
-        data = pd.read_csv(io.BytesIO(response['Body'].read()))
-        X = data.drop(columns=["churned"])
-        y = data["churned"]
+            logging.info(f"Starting MLflow workflow for data from S3 key: {s3_key}")
+            
+            session = get_boto3_session()
+            s3_client = session.client('s3')
+            logging.info(f"Loading data from {PROCESSED_DATA_BUCKET_NAME}/{s3_key}")
+            response = s3_client.get_object(Bucket=PROCESSED_DATA_BUCKET_NAME, Key=s3_key)
+            data = pd.read_csv(io.BytesIO(response['Body'].read()))
+            logging.info(f"Loaded dataset with shape: {data.shape}")
 
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+            X = data.drop(columns=["churned"])
+            y = data["churned"]
+            logging.info(f"Prepared features (X) with shape: {X.shape} and target (y) with shape: {y.shape}")
 
-        with mlflow.start_run():
-            from sklearn.ensemble import RandomForestClassifier
-            from sklearn.model_selection import train_test_split
-            from sklearn.metrics import accuracy_score
+            logging.info(f"Setting MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+            mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+            logging.info(f"Set MLflow experiment: {MLFLOW_EXPERIMENT_NAME}")
 
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            model = RandomForestClassifier()
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
+            with mlflow.start_run() as run:
+                logging.info(f"Started MLflow run with ID: {run.info.run_id}")
+                from sklearn.ensemble import RandomForestClassifier
+                from sklearn.model_selection import train_test_split
+                from sklearn.metrics import accuracy_score
 
-            accuracy = accuracy_score(y_test, y_pred)
-            mlflow.log_metric("accuracy", accuracy)
-            mlflow.sklearn.log_model(model, "model")
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                logging.info(f"Split data - Training set size: {X_train.shape}, Test set size: {X_test.shape}")
 
-            return mlflow.active_run().info.run_id
+                model = RandomForestClassifier()
+                logging.info("Training RandomForestClassifier model...")
+                model.fit(X_train, y_train)
+                
+                y_pred = model.predict(X_test)
+                accuracy = accuracy_score(y_test, y_pred)
+                logging.info(f"Model accuracy: {accuracy:.4f}")
+
+                mlflow.log_metric("accuracy", accuracy)
+                mlflow.sklearn.log_model(model, "model")
+                logging.info("Logged model and metrics to MLflow")
+
+                return run.info.run_id
 
     @task
     def register_best_model(run_id: str):
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        # mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_tracking_uri("http://host.docker.internal:5000")
         client = mlflow.tracking.MlflowClient()
         model_version = client.create_model_version(
             name=MLFLOW_MODEL_NAME,
