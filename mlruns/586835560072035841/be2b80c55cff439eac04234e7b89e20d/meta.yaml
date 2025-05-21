@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/586835560072035841/be2b80c55cff439eac04234e7b89e20d/artifacts
+end_time: 1747823093213
+entry_point_name: ''
+experiment_id: '586835560072035841'
+lifecycle_stage: active
+run_id: be2b80c55cff439eac04234e7b89e20d
+run_name: gifted-wren-119
+run_uuid: be2b80c55cff439eac04234e7b89e20d
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747823064971
+status: 3
+tags: []
+user_id: astro
