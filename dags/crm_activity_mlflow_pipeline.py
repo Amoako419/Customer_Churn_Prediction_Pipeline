@@ -10,6 +10,13 @@ import logging
 import io
 from airflow.exceptions import AirflowSkipException
 from dotenv import load_dotenv
+from sklearn.preprocessing import RobustScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+
+# Silence Git warnings in MLflow
+os.environ['GIT_PYTHON_REFRESH'] = 'quiet'
 
 load_dotenv()
 
@@ -89,7 +96,7 @@ def crm_activity_mlflow_pipeline():
 
     @task
     def clean_and_feature_engineer(data: pd.DataFrame) -> pd.DataFrame:
-        data.drop_duplicates(inplace=True)
+        data = data.drop_duplicates()
         if 'event_type' in data.columns:
             data = pd.get_dummies(data, columns=["event_type"])
         return data
@@ -98,55 +105,188 @@ def crm_activity_mlflow_pipeline():
     def load_to_s3(processed_data: pd.DataFrame) -> str:
         session = get_boto3_session()
         s3_client = session.client('s3')
+        
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        s3_key = f"processed_folder/{timestamp}_processed_data.csv"
+        
         import tempfile
         with tempfile.NamedTemporaryFile(suffix='.csv') as temp_file:
             processed_data.to_csv(temp_file.name, index=False)
             temp_file.flush()
-            s3_client.upload_file(Filename=temp_file.name, Bucket=PROCESSED_DATA_BUCKET_NAME, Key="processed_data.csv")
-        return "processed_data.csv"
-
+            s3_client.upload_file(
+                Filename=temp_file.name,
+                Bucket=PROCESSED_DATA_BUCKET_NAME,
+                Key=s3_key
+            )
+        return s3_key
+    
     @task
     def trigger_mlflow_workflow(s3_key: str) -> str:
-        session = get_boto3_session()
-        s3_client = session.client('s3')
-        response = s3_client.get_object(Bucket=PROCESSED_DATA_BUCKET_NAME, Key=s3_key)
-        data = pd.read_csv(io.BytesIO(response['Body'].read()))
-        X = data.drop(columns=["churned"])
-        y = data["churned"]
+            logging.info(f"Starting MLflow workflow for data from S3 key: {s3_key}")
+            
+            session = get_boto3_session()
+            s3_client = session.client('s3')
+            logging.info(f"Loading data from {PROCESSED_DATA_BUCKET_NAME}/{s3_key}")
+            response = s3_client.get_object(Bucket=PROCESSED_DATA_BUCKET_NAME, Key=s3_key)
+            data = pd.read_csv(io.BytesIO(response['Body'].read()))
+            logging.info(f"Loaded dataset with shape: {data.shape}")
 
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+            X = data.drop(columns=["churned"])
+            y = data["churned"]
+            logging.info(f"Prepared features (X) with shape: {X.shape} and target (y) with shape: {y.shape}")
 
-        with mlflow.start_run():
-            from sklearn.ensemble import RandomForestClassifier
-            from sklearn.model_selection import train_test_split
-            from sklearn.metrics import accuracy_score
+            logging.info(f"Setting MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+            # mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+            mlflow.set_tracking_uri("http://host.docker.internal:5000")
+            mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
+            logging.info(f"Set MLflow experiment: {MLFLOW_EXPERIMENT_NAME}")
 
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            model = RandomForestClassifier()
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
+            with mlflow.start_run() as run:
+                logging.info(f"Started MLflow run with ID: {run.info.run_id}")
+                from sklearn.ensemble import RandomForestClassifier
+                from sklearn.model_selection import train_test_split
+                from sklearn.metrics import accuracy_score
+                from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score, roc_auc_score, confusion_matrix
+                # Feature engineering
+                def engineer_features(df):                    # Convert date columns to datetime and extract features
+                    date_columns = ['signup_date', 'last_login', 'churn_date', 'event_time']
+                    for col in date_columns:
+                        if col in df.columns:
+                            df[col] = pd.to_datetime(df[col])
+                            # Extract components from datetime
+                            df[f'{col}_year'] = df[col].dt.year
+                            df[f'{col}_month'] = df[col].dt.month
+                            df[f'{col}_day'] = df[col].dt.day
+                            # Drop the original datetime column
+                            df = df.drop(columns=[col])
+                    
+                    # Calculate time-based features
+                    if all(col in df.columns for col in ['signup_date_year', 'last_login_year']):
+                        # Calculate account age in days using the numeric components
+                        df['account_age_days'] = (
+                            (df['last_login_year'] - df['signup_date_year']) * 365 +
+                            (df['last_login_month'] - df['signup_date_month']) * 30 +
+                            (df['last_login_day'] - df['signup_date_day'])
+                        )
 
-            accuracy = accuracy_score(y_test, y_pred)
-            mlflow.log_metric("accuracy", accuracy)
-            mlflow.sklearn.log_model(model, "model")
+                    
+                    # Aggregate event type features
+                    event_cols = [col for col in df.columns if col.startswith('event_type_')]
+                    df['total_events'] = df[event_cols].sum(axis=1)
+                    
+                    # Calculate engagement score
+                    df['engagement_score'] = (
+                        (df['event_type_purchase'] if 'event_type_purchase' in df else 0) * 5 +
+                        (df['event_type_add_to_cart'] if 'event_type_add_to_cart' in df else 0) * 3 +
+                        (df['event_type_page_view'] if 'event_type_page_view' in df else 0)
+                    )
+                    
+                    return df
 
-            return mlflow.active_run().info.run_id
+                # Apply feature engineering
+                X = engineer_features(X)
+                  # Drop non-predictive columns
+                columns_to_drop = ['name', 'email', 'session_id', 'page_url', 'source_file', 'event_id']
+                X = X.drop(columns=[col for col in columns_to_drop if col in X.columns], errors='ignore')
 
-    @task
-    def register_best_model(run_id: str):
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        client = mlflow.tracking.MlflowClient()
-        model_version = client.create_model_version(
-            name=MLFLOW_MODEL_NAME,
-            source=f"runs:/{run_id}/model",
-            run_id=run_id
-        )
-        client.transition_model_version_stage(
-            name=MLFLOW_MODEL_NAME,
-            version=model_version.version,
-            stage="Staging"
-        )
+                # Identify feature types
+                numeric_features = X.select_dtypes(include=['int64', 'float64']).columns
+                categorical_features = X.select_dtypes(include=['object']).columns
+                
+                # Create preprocessing steps with robust scaling for numeric features
+                numeric_transformer = Pipeline([
+                    ('imputer', SimpleImputer(strategy='median')),
+                    ('scaler', RobustScaler())
+                ])
+                
+                categorical_transformer = Pipeline([
+                    ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+                    ('encoder', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'))
+                ])
+
+                # Combine preprocessing steps
+                preprocessor = ColumnTransformer(
+                    transformers=[
+                        ('num', numeric_transformer, numeric_features),
+                        ('cat', categorical_transformer, categorical_features)
+                    ],
+                    remainder='passthrough'
+                )
+
+                # Create pipeline
+                model = Pipeline([
+                    ('preprocessor', preprocessor),
+                    ('classifier', RandomForestClassifier())
+                ])
+
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                logging.info(f"Split data - Training set size: {X_train.shape}, Test set size: {X_test.shape}")
+
+                logging.info("Training model with preprocessing pipeline...")
+                model.fit(X_train, y_train)
+                
+                y_pred = model.predict(X_test)
+                y_pred_proba = model.predict_proba(X_test)[:,1]
+                
+                # Calculate various metrics
+                accuracy = accuracy_score(y_test, y_pred)
+                f1 = f1_score(y_test, y_pred)
+                recall = recall_score(y_test, y_pred)
+                precision = precision_score(y_test, y_pred)
+                roc_auc = roc_auc_score(y_test, y_pred_proba)
+                conf_matrix = confusion_matrix(y_test, y_pred)
+                
+                # Log all metrics
+                logging.info(f"Model Performance Metrics:")
+                logging.info(f"Accuracy: {accuracy:.4f}")
+                logging.info(f"F1 Score: {f1:.4f}")
+                logging.info(f"Recall: {recall:.4f}")
+                logging.info(f"Precision: {precision:.4f}")
+                logging.info(f"ROC AUC: {roc_auc:.4f}")
+                logging.info(f"Confusion Matrix:\n{conf_matrix}")
+                
+                # Log metrics to MLflow
+                mlflow.log_metric("accuracy", accuracy)
+                mlflow.log_metric("f1_score", f1)
+                mlflow.log_metric("recall", recall)
+                mlflow.log_metric("precision", precision)
+                mlflow.log_metric("roc_auc", roc_auc)
+
+                mlflow.log_metric("accuracy", accuracy)
+                mlflow.sklearn.log_model(model, "model")
+                logging.info("Logged model and metrics to MLflow")
+
+                return run.info.run_id
+
+    @task(retries=3, retry_delay=50)
+    def register_best_model(mlflow_run_id: str):
+        import time
+        from mlflow.exceptions import MlflowException
+        max_retries = 3
+        retry_delay = 10
+
+        for attempt in range(max_retries):
+            try:
+                # mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+                mlflow.set_tracking_uri("http://host.docker.internal:5000")
+                client = mlflow.tracking.MlflowClient()
+                model_version = client.create_model_version(
+                    name=MLFLOW_MODEL_NAME,
+                    source=f"runs:/{mlflow_run_id}/model",
+                    run_id=mlflow_run_id
+                )
+                client.transition_model_version_stage(
+                    name=MLFLOW_MODEL_NAME,
+                    version=model_version.version,
+                    stage="Staging"
+                )
+                return
+            except MlflowException as e:
+                if attempt == max_retries - 1:
+                    raise
+                logging.warning(f"Attempt {attempt + 1} failed. Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
 
     # DAG execution flow
     crm = extract_crm_data()

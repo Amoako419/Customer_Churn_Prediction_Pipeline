@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/586835560072035841/2f05599aab584269ae8ef77e70c4da2c/artifacts
+end_time: 1747821669957
+entry_point_name: ''
+experiment_id: '586835560072035841'
+lifecycle_stage: active
+run_id: 2f05599aab584269ae8ef77e70c4da2c
+run_name: industrious-ray-273
+run_uuid: 2f05599aab584269ae8ef77e70c4da2c
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747821650453
+status: 3
+tags: []
+user_id: astro

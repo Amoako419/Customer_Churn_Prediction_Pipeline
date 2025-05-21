@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1747823664789
+current_stage: None
+description: ''
+last_updated_timestamp: 1747823664789
+name: crm_activity_classifier
+run_id: be2b80c55cff439eac04234e7b89e20d
+run_link: ''
+source: mlflow-artifacts:/586835560072035841/be2b80c55cff439eac04234e7b89e20d/artifacts/model
+status: READY
+status_message: null
+storage_location: mlflow-artifacts:/586835560072035841/be2b80c55cff439eac04234e7b89e20d/artifacts/model
+user_id: null
+version: 1
