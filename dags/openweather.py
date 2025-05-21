@@ -14,11 +14,11 @@ load_dotenv()
 
 # Get API key from environment variables
 api_key = os.getenv('OPENWEATHER_API_KEY')
-if not api_key:
-    # In a real DAG, you might want to log an error and exit gracefully or let Airflow fail.
-    # Raising an exception here will prevent the DAG from parsing.
-    # Consider using Airflow Variables or Secrets for API keys instead of .env in production.
-    raise ValueError("OPENWEATHER_API_KEY not found in environment variables")
+# if not api_key:
+#     # In a real DAG, you might want to log an error and exit gracefully or let Airflow fail.
+#     # Raising an exception here will prevent the DAG from parsing.
+#     # Consider using Airflow Variables or Secrets for API keys instead of .env in production.
+#     raise ValueError("OPENWEATHER_API_KEY not found in environment variables")
 
 @dag(
     dag_id="fetch_weather_data_with_sensor",
