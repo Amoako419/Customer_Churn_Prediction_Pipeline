@@ -3,6 +3,7 @@
 This project implements an end-to-end machine learning pipeline for predicting customer churn using Apache Airflow, MLflow, and AWS services. The pipeline processes customer data and activity logs to build and deploy a machine learning model that predicts customer churn probability.
 
 ## Architecture
+![image](assets/images/architecture_diagram%20(2).jpg)
 
 The pipeline consists of several components:
 - Data ingestion from AWS RDS (CRM data) and S3 (activity logs)
@@ -176,6 +177,14 @@ This command will spin up the Airflow components:
 - Navigate to DAGs view
 - Locate 'crm_activity_mlflow_pipeline'
 - Click "Trigger DAG"
+
+## Monitor the pipeline execution:
+- Check task status in the Airflow UI
+- View logs for each task
+- Monitor MLflow for model training and evaluation
+
+![image](assets/images/crm_activity_mlflow_pipeline-graph.png)
+
 
 ## Features
 

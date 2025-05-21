@@ -146,7 +146,6 @@ def crm_activity_mlflow_pipeline():
                 logging.info(f"Started MLflow run with ID: {run.info.run_id}")
                 from sklearn.ensemble import RandomForestClassifier
                 from sklearn.model_selection import train_test_split
-                from sklearn.metrics import accuracy_score
                 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score, roc_auc_score, confusion_matrix
                 # Feature engineering
                 def engineer_features(df):                    # Convert date columns to datetime and extract features
