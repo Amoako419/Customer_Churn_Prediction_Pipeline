@@ -125,14 +125,14 @@ pip install -r requirements.txt
 
 ### Local Testing
 
-1. Run Astro tests:
+1. Parse Astro dags:
 ```bash
-astro dev test tests
+astro dev parse
 ```
 
 2. Run pytest:
 ```bash
-pytest tests/
+astro dev pytest
 ```
 
 ### Continuous Integration
@@ -183,8 +183,62 @@ This command will spin up the Airflow components:
 - View logs for each task
 - Monitor MLflow for model training and evaluation
 
+## The airflow dag
+
 ![image](assets/images/crm_activity_mlflow_pipeline-graph.png)
 
+The DAG consists of the following tasks:
+
+1. **extract_crm_data**: 
+   - Extracts customer data from AWS RDS
+   - Includes customer demographics and subscription details
+   - Performs initial data validation
+   - Raises AirflowSkipException if no data is available
+
+2. **extract_activity_data**: 
+   - Fetches user activity logs from S3
+   - Combines multiple CSV files
+   - Includes user interactions and event data
+   - Validates data completeness and quality
+
+3. **merge_and_transform**: 
+   - Joins CRM data with activity logs
+   - Performs initial data cleaning
+   - Removes duplicates
+   - Creates unified customer profile
+
+4. **clean_and_feature_engineer**: 
+   - Handles missing values
+   - Creates derived features
+   - Performs one-hot encoding for categorical variables
+   - Calculates engagement metrics
+
+5. **load_to_s3**: 
+   - Saves processed dataset to S3
+   - Creates timestamped versions
+   - Ensures data persistence
+   - Enables version tracking
+
+6. **trigger_mlflow_workflow**: 
+   - Initiates model training
+   - Performs data preprocessing:
+     - Time-based feature extraction
+     - Categorical encoding
+     - Numerical scaling
+   - Trains RandomForestClassifier
+   - Logs metrics and artifacts to MLflow:
+     - Accuracy
+     - F1 Score
+     - ROC AUC
+     - Precision/Recall
+
+7. **register_best_model**: 
+   - Registers trained model in MLflow
+   - Transitions model to staging
+   - Implements retry mechanism
+   - Ensures model versioning
+
+Each task includes comprehensive logging and error handling, with automatic retries for transient failures. The pipeline is designed to be idempotent and can safely handle task restarts.
 
 ## Features
 
