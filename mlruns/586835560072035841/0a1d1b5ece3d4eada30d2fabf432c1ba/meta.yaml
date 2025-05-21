@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/586835560072035841/0a1d1b5ece3d4eada30d2fabf432c1ba/artifacts
+end_time: 1747821061895
+entry_point_name: ''
+experiment_id: '586835560072035841'
+lifecycle_stage: active
+run_id: 0a1d1b5ece3d4eada30d2fabf432c1ba
+run_name: amusing-mole-166
+run_uuid: 0a1d1b5ece3d4eada30d2fabf432c1ba
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747821061363
+status: 4
+tags: []
+user_id: astro
