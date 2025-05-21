@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1747823678720
+current_stage: Staging
+description: ''
+last_updated_timestamp: 1747823678818
+name: crm_activity_classifier
+run_id: be2b80c55cff439eac04234e7b89e20d
+run_link: ''
+source: runs:/be2b80c55cff439eac04234e7b89e20d/model
+status: READY
+status_message: null
+storage_location: runs:/be2b80c55cff439eac04234e7b89e20d/model
+user_id: null
+version: 2

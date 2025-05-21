@@ -11,18 +11,65 @@ The pipeline consists of several components:
 - Model versioning and deployment
 - Performance monitoring and logging
 
-## Project Contents
+## Project Structure
 
-Your Astro project contains the following files and folders:
+```
+.
+├── airflow_settings.yaml     # Local Airflow configurations
+├── architecture_diagram.drawio  # Pipeline architecture diagram
+├── Dockerfile               # Airflow runtime configuration
+├── packages.txt            # System-level dependencies
+├── requirements.txt        # Python package dependencies
+├── README.md              # Project documentation
+├── dags/                  # Airflow DAG definitions
+│   ├── crm_activity_mlflow_pipeline.py  # Main pipeline DAG
+│   ├── exampledag.py     # Example DAG
+│   └── openweather.py    # Weather data DAG
+├── data/                  # Data directory
+│   ├── processed_data.csv
+│   ├── crm_data/         # Customer data
+│   │   ├── crm_data_1.csv
+│   │   ├── crm_data_2.csv
+│   │   └── crm_data_3.csv
+│   └── logs/             # Activity logs
+│       ├── activity_data_1.csv
+│       ├── activity_data_2.csv
+│       └── activity_data_3.csv
+├── include/              # Additional resources
+├── mlartifacts/         # MLflow model artifacts
+├── mlruns/              # MLflow experiment tracking
+├── plugins/             # Airflow plugins
+├── scripts/             # Utility scripts
+│   ├── data_view.ipynb  # Data analysis notebook
+│   ├── generate_activity_data.py
+│   ├── generate_crm_data.py
+│   ├── load_crm_to_rds.py
+│   └── ml_app.py       # ML application script
+└── tests/              # Test files
+    └── dags/          # DAG tests
+        └── test_dag_example.py
 
-- dags: This folder contains the Python files for your Airflow DAGs. By default, this directory includes one example DAG:
-    - `example_astronauts`: This DAG shows a simple ETL pipeline example that queries the list of astronauts currently in space from the Open Notify API and prints a statement for each astronaut. The DAG uses the TaskFlow API to define tasks in Python, and dynamic task mapping to dynamically print a statement for each astronaut. For more on how this DAG works, see our [Getting started tutorial](https://www.astronomer.io/docs/learn/get-started-with-airflow).
-- Dockerfile: This file contains a versioned Astro Runtime Docker image that provides a differentiated Airflow experience. If you want to execute other commands or overrides at runtime, specify them here.
-- include: This folder contains any additional files that you want to include as part of your project. It is empty by default.
-- packages.txt: Install OS-level packages needed for your project by adding them to this file. It is empty by default.
-- requirements.txt: Install Python packages needed for your project by adding them to this file. It is empty by default.
-- plugins: Add custom or community plugins for your project to this file. It is empty by default.
-- airflow_settings.yaml: Use this local-only file to specify Airflow Connections, Variables, and Pools instead of entering them in the Airflow UI as you develop DAGs in this project.
+Key Components:
+1. Data Pipeline (dags/):
+   - Customer data ingestion
+   - Activity log processing
+   - Feature engineering
+   - Model training workflow
+
+2. Data Management (data/):
+   - CRM data storage
+   - Activity logs
+   - Processed datasets
+
+3. Machine Learning (mlartifacts/, mlruns/):
+   - Model artifacts
+   - Experiment tracking
+   - Performance metrics
+
+4. Development Tools (scripts/):
+   - Data generation utilities
+   - Loading scripts
+   - Analysis notebooks
 
 ## Prerequisites
 
